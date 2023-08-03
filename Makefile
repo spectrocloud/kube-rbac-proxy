@@ -14,7 +14,23 @@ DOCKER_REPO?=quay.io/brancz/kube-rbac-proxy
 KUBECONFIG?=$(HOME)/.kube/config
 CONTAINER_NAME?=$(DOCKER_REPO):$(VERSION)
 
-ALL_ARCH=amd64 arm arm64 ppc64le s390x
+# Fips Flags
+FIPS_ENABLE ?= ""
+
+RELEASE_LOC := release
+ifeq ($(FIPS_ENABLE),yes)
+RELEASE_LOC := release-fips
+endif
+
+SPECTRO_VERSION ?= 4.0.0-dev
+TAG ?= v1.5.2-spectro-${SPECTRO_VERSION}
+
+# ALL_ARCH = amd64 arm arm64 ppc64le s390x
+ALL_ARCH = amd64 
+
+REGISTRY ?= gcr.io/spectro-dev-public/$(USER)/${RELEASE_LOC}
+
+ALL_ARCH=amd64
 ALL_PLATFORMS=$(addprefix linux/,$(ALL_ARCH))
 ALL_BINARIES ?= $(addprefix $(OUT_DIR)/$(BIN)-, \
 				$(addprefix linux-,$(ALL_ARCH)) \
@@ -55,7 +71,7 @@ update-go-deps:
 	go mod tidy
 
 container: $(OUT_DIR)/$(BIN)-$(GOOS)-$(GOARCH) Dockerfile
-	docker build --build-arg BINARY=$(BIN)-$(GOOS)-$(GOARCH) --build-arg GOARCH=$(GOARCH) -t $(CONTAINER_NAME)-$(GOARCH) .
+	docker build --build-arg CRYPTO_LIB=${FIPS_ENABLE} --build-arg BINARY=$(BIN)-$(GOOS)-$(GOARCH) --build-arg GOARCH=$(GOARCH) -t $(CONTAINER_NAME)-$(GOARCH) .
 ifeq ($(GOARCH), amd64)
 	docker tag $(DOCKER_REPO):$(VERSION)-$(GOARCH) $(CONTAINER_NAME)
 endif
