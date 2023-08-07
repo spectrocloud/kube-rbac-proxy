@@ -19,9 +19,12 @@ FIPS_ENABLE ?= ""
 
 RELEASE_LOC := release
 ifeq ($(FIPS_ENABLE),yes)
-RELEASE_LOC := release-fips
+  RELEASE_LOC := release-fips	
+  CGO_FLAG=1
+  LDFLAGS=-ldflags "-linkmode=external  -extldflags -static"
 endif
-
+CGO_FLAG ?= 0
+LDFLAGS ?= ""
 SPECTRO_VERSION ?= 4.0.0-dev
 TAG ?= v1.5.2-spectro-${SPECTRO_VERSION}
 
@@ -56,8 +59,7 @@ $(OUT_DIR)/$(BIN)-%:
 	@echo ">> building for $(GOOS)/$(GOARCH) to $(OUT_DIR)/$(BIN)-$*"
 	GOARCH=$(word 2,$(subst -, ,$(*:.exe=))) \
 	GOOS=$(word 1,$(subst -, ,$(*:.exe=))) \
-	CGO_ENABLED=0 \
-	go build --installsuffix cgo -o $(OUT_DIR)/$(BIN)-$* $(GITHUB_URL)/cmd/kube-rbac-proxy
+	CGO_ENABLED=$(CGO_FLAG) go build --installsuffix cgo -o  $(OUT_DIR)/$(BIN)-$* $(LDFLAGS) $(GITHUB_URL)/cmd/kube-rbac-proxy
 
 clean:
 	-rm -r $(OUT_DIR)
