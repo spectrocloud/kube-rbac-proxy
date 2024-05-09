@@ -6,7 +6,7 @@ export GO111MODULE
 GITHUB_URL=github.com/brancz/kube-rbac-proxy
 GOOS?=$(shell uname -s | tr A-Z a-z)
 GOARCH?=$(shell go env GOARCH)
-OUT_DIR=_output
+OUT_DIR=cmd/kube-rbac-proxy/_output
 BIN?=kube-rbac-proxy
 VERSION?=$(shell cat VERSION)-$(shell git rev-parse --short HEAD)
 PKGS=$(shell go list ./... | grep -v /test/e2e)
@@ -16,24 +16,28 @@ CONTAINER_NAME?=$(DOCKER_REPO):$(VERSION)
 
 # Fips Flags
 FIPS_ENABLE ?= ""
+BUILD_ARGS = --build-arg CRYPTO_LIB=${FIPS_ENABLE} --build-arg BUILDER_GOLANG_VERSION=${BUILDER_GOLANG_VERSION}
+
 
 RELEASE_LOC := release
 ifeq ($(FIPS_ENABLE),yes)
-  RELEASE_LOC := release-fips	
+  RELEASE_LOC := release-fips
   CGO_FLAG=1
   LDFLAGS=-ldflags "-linkmode=external  -extldflags -static"
 endif
 CGO_FLAG ?= 0
 LDFLAGS ?= ""
 SPECTRO_VERSION ?= 4.0.0-dev
-TAG ?= v1.5.2-spectro-${SPECTRO_VERSION}
+TAG ?= v0.14.0-spectro-${SPECTRO_VERSION}
 
 # ALL_ARCH = amd64 arm arm64 ppc64le s390x
-ALL_ARCH = amd64 
 
-REGISTRY ?= gcr.io/spectro-dev-public/$(USER)/${RELEASE_LOC}
+REGISTRY ?= gcr.io/spectro-dev-public/${RELEASE_LOC}
+CORE_IMAGE_NAME ?= kube-rbac-proxy
+IMG ?= $(REGISTRY)/$(CORE_IMAGE_NAME)
 
-ALL_ARCH=amd64
+ARCH ?= amd64
+ALL_ARCH=amd64 arm64
 ALL_PLATFORMS=$(addprefix linux/,$(ALL_ARCH))
 ALL_BINARIES ?= $(addprefix $(OUT_DIR)/$(BIN)-, \
 				$(addprefix linux-,$(ALL_ARCH)) \
@@ -45,6 +49,55 @@ export PATH := $(TOOLS_BIN_DIR):$(PATH)
 
 EMBEDMD_BINARY=$(TOOLS_BIN_DIR)/embedmd
 TOOLING=$(EMBEDMD_BINARY)
+
+#### BUILD BINARIES
+binary-arm64: ## Run this command from inside cmd/kube-rbac-proxy
+	cd cmd/kube-rbac-proxy && GOOS=linux GOARCH=arm64 go build --installsuffix cgo -o  _output/kube-rbac-proxy-linux-arm64
+	cd ../..
+
+binary-amd64: ## Run this command from inside cmd/kube-rbac-proxy
+	cd cmd/kube-rbac-proxy && GOOS=linux GOARCH=amd64 go build --installsuffix cgo -o  _output/kube-rbac-proxy-linux-amd64
+	cd ../..
+
+#### DOCKER BUILD
+.PHONY: docker-build
+docker-build:  $(OUT_DIR)/$(BIN)-linux-$(ARCH) Dockerfile## Build the docker image for controller-manager
+	docker buildx build --load --platform linux/${ARCH} ${BUILD_ARGS} --build-arg BINARY=$(BIN)-linux-$(ARCH) --build-arg ARCH=$(ARCH) . -t $(IMG)-$(ARCH):$(TAG)
+	@echo $(IMG)-$(ARCH):$(TAG)
+
+.PHONY: docker-build-all ## Build all the architecture docker images
+docker-build-all: $(addprefix docker-build-,$(ALL_ARCH))
+
+docker-build-%: ## Build docker images for a given ARCH
+	$(MAKE) ARCH=$* docker-build
+
+
+#### DOCKER PUSH
+.PHONY: docker-push
+docker-push: ## Push the docker image
+	docker push $(IMG)-$(ARCH):$(TAG)
+
+.PHONY: docker-push-all ## Push all the architecture docker images
+docker-push-all: $(addprefix docker-push-,$(ALL_ARCH))
+	$(MAKE) docker-push-core-manifest
+
+docker-push-%: ## Docker push
+	$(MAKE) ARCH=$* docker-push
+
+.PHONY: docker-push-core-manifest
+docker-push-core-manifest: ## Push the fat manifest docker image.
+	## Minimum docker version 18.06.0 is required for creating and pushing manifest images.
+	$(MAKE) docker-push-manifest IMAGE=$(IMG) MANIFEST_FILE=$(CORE_MANIFEST_FILE)
+
+.PHONY: docker-push-manifest
+docker-push-manifest: ## Push the manifest image
+	docker manifest create --amend $(IMAGE):$(TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(IMAGE)\-&:$(TAG)~g")
+	@for arch in $(ALL_ARCH); do docker manifest annotate --arch $${arch} ${IMAGE}:${TAG} ${IMAGE}-$${arch}:${TAG}; done
+	docker manifest push --purge ${IMAGE}:${TAG}
+
+
+
+
 
 check-license:
 	@echo ">> checking license headers"
