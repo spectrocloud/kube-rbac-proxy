@@ -19,11 +19,9 @@ FIPS_ENABLE ?= ""
 BUILDER_GOLANG_VERSION ?= 1.22
 BUILD_ARGS = --build-arg CRYPTO_LIB=${FIPS_ENABLE} --build-arg BUILDER_GOLANG_VERSION=${BUILDER_GOLANG_VERSION}
 
-IMG_PATH ?= "gcr.io/spectro-dev-public/${USER}"
+IMG_PATH ?= "gcr.io/spectro-dev-public"
 IMG_TAG ?= "latest"
-IMG_SERVICE_URL ?= ${IMG_PATH}/
-KRP_IMG ?= ${IMG_SERVICE_URL}kube-rbac-proxy:${IMG_TAG}
-
+IMG_SERVICE_URL ?= ${IMG_PATH}
 
 RELEASE_LOC := release
 ifeq ($(FIPS_ENABLE),yes)
@@ -31,11 +29,13 @@ ifeq ($(FIPS_ENABLE),yes)
   CGO_FLAG=1
   LDFLAGS=-ldflags "-linkmode=external  -extldflags -static"
 endif
+
 CGO_FLAG ?= 0
 LDFLAGS ?= ""
 SPECTRO_VERSION ?= 4.0.0-dev
 TAG ?= v0.14.0-spectro-${SPECTRO_VERSION}
 
+KRP_IMG ?= ${IMG_SERVICE_URL}/${RELEASE_LOC}/kube-rbac-proxy:${IMG_TAG}
 # ALL_ARCH = amd64 arm arm64 ppc64le s390x
 
 REGISTRY ?= gcr.io/spectro-dev-public/${RELEASE_LOC}
