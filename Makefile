@@ -16,7 +16,13 @@ CONTAINER_NAME?=$(DOCKER_REPO):$(VERSION)
 
 # Fips Flags
 FIPS_ENABLE ?= ""
+BUILDER_GOLANG_VERSION ?= 1.22
 BUILD_ARGS = --build-arg CRYPTO_LIB=${FIPS_ENABLE} --build-arg BUILDER_GOLANG_VERSION=${BUILDER_GOLANG_VERSION}
+
+IMG_PATH ?= "gcr.io/spectro-dev-public/${USER}"
+IMG_TAG ?= "latest"
+IMG_SERVICE_URL ?= ${IMG_PATH}/
+KRP_IMG ?= ${IMG_SERVICE_URL}kube-rbac-proxy:${IMG_TAG}
 
 
 RELEASE_LOC := release
@@ -71,7 +77,6 @@ docker-build-all: $(addprefix docker-build-,$(ALL_ARCH))
 docker-build-%: ## Build docker images for a given ARCH
 	$(MAKE) ARCH=$* docker-build
 
-
 #### DOCKER PUSH
 .PHONY: docker-push
 docker-push: ## Push the docker image
@@ -95,9 +100,9 @@ docker-push-manifest: ## Push the manifest image
 	@for arch in $(ALL_ARCH); do docker manifest annotate --arch $${arch} ${IMAGE}:${TAG} ${IMAGE}-$${arch}:${TAG}; done
 	docker manifest push --purge ${IMAGE}:${TAG}
 
-
-
-
+.PHONY: docker
+docker:
+	docker buildx build --platform linux/amd64,linux/arm64 --push . -t ${KRP_IMG} ${BUILD_ARGS} -f Dockerfile
 
 check-license:
 	@echo ">> checking license headers"
