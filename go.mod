@@ -1,6 +1,8 @@
 module github.com/brancz/kube-rbac-proxy
 
-go 1.22.4
+go 1.22.0
+
+toolchain go1.22.4
 
 require (
 	github.com/ghodss/yaml v1.0.0
