@@ -1,6 +1,6 @@
 ARG BUILDER_GOLANG_VERSION
 
-FROM --platform=$TARGETPLATFORM gcr.io/spectro-images-public/golang:${BUILDER_GOLANG_VERSION}-alpine as builder
+FROM --platform=$TARGETPLATFORM us-docker.pkg.dev/palette-images/build-base-images/golang:${BUILDER_GOLANG_VERSION}-alpine as builder
 ARG TARGETOS
 ARG TARGETARCH
 ARG CRYPTO_LIB
