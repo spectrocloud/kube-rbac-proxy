@@ -8,7 +8,8 @@ GITHUB_URL=github.com/brancz/kube-rbac-proxy
 GOOS?=$(shell uname -s | tr A-Z a-z)
 GOARCH?=$(shell go env GOARCH)
 BASEIMAGE?=gcr.io/distroless/static:nonroot-$(GOARCH)
-OUT_DIR=_output
+OUT_DIR=cmd/kube-rbac-proxy/_output
+BIN?=kube-rbac-proxy
 VERSION?=$(shell cat VERSION)-$(shell git rev-parse --short HEAD)
 VERSION_SEMVER?=$(shell echo $(VERSION) | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+')
 PKGS=$(shell go list ./... | grep -v /test/e2e)
@@ -16,7 +17,36 @@ DOCKER_REPO?=quay.io/brancz/kube-rbac-proxy
 KUBECONFIG?=$(HOME)/.kube/config
 CONTAINER_NAME?=$(DOCKER_REPO):$(VERSION)
 
-ALL_ARCH=amd64 arm arm64 ppc64le s390x
+# Fips Flags
+FIPS_ENABLE ?= ""
+BUILDER_GOLANG_VERSION ?= 1.23
+BUILD_ARGS = --build-arg CRYPTO_LIB=${FIPS_ENABLE} --build-arg BUILDER_GOLANG_VERSION=${BUILDER_GOLANG_VERSION}
+
+
+IMG_PATH ?= "us-east1-docker.pkg.dev/spectro-images/dev"
+IMG_TAG ?= "latest"
+IMG_SERVICE_URL ?= ${IMG_PATH}
+
+RELEASE_LOC := release
+ifeq ($(FIPS_ENABLE),yes)
+  RELEASE_LOC := release-fips
+  CGO_FLAG=1
+  LDFLAGS=-ldflags "-linkmode=external  -extldflags -static"
+endif
+CGO_FLAG ?= 0
+LDFLAGS ?= ""
+SPECTRO_VERSION ?= 4.7.0-dev
+TAG ?= v0.19.1-spectro-${SPECTRO_VERSION}
+
+KRP_IMG ?= ${IMG_SERVICE_URL}/${RELEASE_LOC}/kube-rbac-proxy:${IMG_TAG}
+
+REGISTRY ?= us-east1-docker.pkg.dev/spectro-images/dev/${RELEASE_LOC}
+CORE_IMAGE_NAME ?= kube-rbac-proxy
+IMG ?= $(REGISTRY)/$(CORE_IMAGE_NAME)
+
+ARCH ?= amd64
+ALL_ARCH=amd64 arm64
+
 ALL_PLATFORMS=$(addprefix linux/,$(ALL_ARCH))
 ALL_BINARIES ?= $(addprefix $(OUT_DIR)/$(PROGRAM_NAME)-, \
 				$(addprefix linux-,$(ALL_ARCH)) \
@@ -28,6 +58,60 @@ export PATH := $(TOOLS_BIN_DIR):$(PATH)
 
 EMBEDMD_BINARY=$(TOOLS_BIN_DIR)/embedmd
 TOOLING=$(EMBEDMD_BINARY)
+
+
+#### SPECTRO
+#### BUILD BINARIES
+binary-arm64: ## Run this command from inside cmd/kube-rbac-proxy
+	cd cmd/kube-rbac-proxy && GOOS=linux GOARCH=arm64 go build --installsuffix cgo -o  _output/kube-rbac-proxy-linux-arm64
+	cd ../..
+
+binary-amd64: ## Run this command from inside cmd/kube-rbac-proxy
+	cd cmd/kube-rbac-proxy && GOOS=linux GOARCH=amd64 go build --installsuffix cgo -o  _output/kube-rbac-proxy-linux-amd64
+	cd ../..
+
+#### DOCKER BUILD
+.PHONY: docker-build
+docker-build:  $(OUT_DIR)/$(BIN)-linux-$(ARCH) Dockerfile## Build the docker image for controller-manager
+	docker buildx build --load --platform linux/${ARCH} ${BUILD_ARGS} --build-arg BINARY=$(BIN)-linux-$(ARCH) --build-arg ARCH=$(ARCH) . -t $(IMG)-$(ARCH):$(TAG)
+	@echo $(IMG)-$(ARCH):$(TAG)
+
+.PHONY: docker-build-all ## Build all the architecture docker images
+docker-build-all: $(addprefix docker-build-,$(ALL_ARCH))
+
+docker-build-%: ## Build docker images for a given ARCH
+	$(MAKE) ARCH=$* docker-build
+
+
+#### DOCKER PUSH
+.PHONY: docker-push
+docker-push: ## Push the docker image
+	docker push $(IMG)-$(ARCH):$(TAG)
+
+.PHONY: docker-push-all ## Push all the architecture docker images
+docker-push-all: $(addprefix docker-push-,$(ALL_ARCH))
+	$(MAKE) docker-push-core-manifest
+
+docker-push-%: ## Docker push
+	$(MAKE) ARCH=$* docker-push
+
+.PHONY: docker-push-core-manifest
+docker-push-core-manifest: ## Push the fat manifest docker image.
+	## Minimum docker version 18.06.0 is required for creating and pushing manifest images.
+	$(MAKE) docker-push-manifest IMAGE=$(IMG) MANIFEST_FILE=$(CORE_MANIFEST_FILE)
+
+.PHONY: docker-push-manifest
+docker-push-manifest: ## Push the manifest image
+	docker manifest create --amend $(IMAGE):$(TAG) $(shell echo $(ALL_ARCH) | sed -e "s~[^ ]*~$(IMAGE)\-&:$(TAG)~g")
+	@for arch in $(ALL_ARCH); do docker manifest annotate --arch $${arch} ${IMAGE}:${TAG} ${IMAGE}-$${arch}:${TAG}; done
+	docker manifest push --purge ${IMAGE}:${TAG}
+
+.PHONY: docker
+docker:
+	docker buildx build --platform linux/amd64,linux/arm64 --push . -t ${KRP_IMG} ${BUILD_ARGS} -f Dockerfile
+
+
+
 
 check-license:
 	@echo ">> checking license headers"
@@ -42,8 +126,7 @@ $(OUT_DIR)/$(PROGRAM_NAME)-%:
 	@echo ">> building for $(GOOS)/$(GOARCH) to $(OUT_DIR)/$(PROGRAM_NAME)-$*"
 	GOARCH=$(word 2,$(subst -, ,$(*:.exe=))) \
 	GOOS=$(word 1,$(subst -, ,$(*:.exe=))) \
-	CGO_ENABLED=0 \
-	go build --installsuffix cgo -ldflags="-X k8s.io/component-base/version.gitVersion=$(VERSION_SEMVER) -X k8s.io/component-base/version.gitCommit=$(shell git rev-parse HEAD) -X k8s.io/component-base/version/verflag.programName=$(PROGRAM_NAME)" -o $(OUT_DIR)/$(PROGRAM_NAME)-$* $(GITHUB_URL)/cmd/kube-rbac-proxy
+	CGO_ENABLED=$(CGO_FLAG) go build --installsuffix cgo -o  $(OUT_DIR)/$(BIN)-$* $(LDFLAGS) $(GITHUB_URL)/cmd/kube-rbac-proxy
 
 clean:
 	-rm -r $(OUT_DIR)
@@ -57,7 +140,7 @@ update-go-deps:
 	go mod tidy
 
 container: $(OUT_DIR)/$(PROGRAM_NAME)-$(GOOS)-$(GOARCH) Dockerfile
-	docker build --build-arg BINARY=$(PROGRAM_NAME)-$(GOOS)-$(GOARCH) --build-arg GOARCH=$(GOARCH) --build-arg BASEIMAGE=$(BASEIMAGE) -t $(CONTAINER_NAME)-$(GOARCH) .
+	docker build --build-arg CRYPTO_LIB=${FIPS_ENABLE} --build-arg BINARY=$(BIN)-$(GOOS)-$(GOARCH) --build-arg GOARCH=$(GOARCH) -t $(CONTAINER_NAME)-$(GOARCH) .
 ifeq ($(GOARCH), amd64)
 	docker tag $(DOCKER_REPO):$(VERSION)-$(GOARCH) $(CONTAINER_NAME)
 endif
