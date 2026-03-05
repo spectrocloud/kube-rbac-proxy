@@ -19,7 +19,7 @@ CONTAINER_NAME?=$(DOCKER_REPO):$(VERSION)
 
 # Fips Flags
 FIPS_ENABLE ?= ""
-BUILDER_GOLANG_VERSION ?= 1.23
+BUILDER_GOLANG_VERSION ?= 1.24.13
 BUILD_ARGS = --build-arg CRYPTO_LIB=${FIPS_ENABLE} --build-arg BUILDER_GOLANG_VERSION=${BUILDER_GOLANG_VERSION}
 
 
@@ -34,8 +34,8 @@ ifeq ($(FIPS_ENABLE),yes)
   LDFLAGS=-ldflags "-linkmode=external  -extldflags -static"
 endif
 CGO_FLAG ?= 0
-LDFLAGS ?= ""
-SPECTRO_VERSION ?= 4.7.0-dev
+LDFLAGS ?=
+SPECTRO_VERSION ?= 4.8.3-dev
 TAG ?= v0.19.1-spectro-${SPECTRO_VERSION}
 
 KRP_IMG ?= ${IMG_SERVICE_URL}/${RELEASE_LOC}/kube-rbac-proxy:${IMG_TAG}
@@ -73,7 +73,7 @@ binary-amd64: ## Run this command from inside cmd/kube-rbac-proxy
 #### DOCKER BUILD
 .PHONY: docker-build
 docker-build:  $(OUT_DIR)/$(BIN)-linux-$(ARCH) Dockerfile## Build the docker image for controller-manager
-	docker buildx build --load --platform linux/${ARCH} ${BUILD_ARGS} --build-arg BINARY=$(BIN)-linux-$(ARCH) --build-arg ARCH=$(ARCH) . -t $(IMG)-$(ARCH):$(TAG)
+	docker buildx build --load --platform linux/${ARCH} ${BUILD_ARGS} --build-arg BINARY=$(BIN)-linux-$(ARCH) --build-arg ARCH=$(ARCH) . -t $(IMG)-$(ARCH):$(TAG) --provenance=false
 	@echo $(IMG)-$(ARCH):$(TAG)
 
 .PHONY: docker-build-all ## Build all the architecture docker images
