@@ -35,7 +35,7 @@ ifeq ($(FIPS_ENABLE),yes)
 endif
 CGO_FLAG ?= 0
 LDFLAGS ?=
-SPECTRO_VERSION ?= 4.8.3-dev
+SPECTRO_VERSION ?= 4.9.4-dev
 TAG ?= v0.19.1-spectro-${SPECTRO_VERSION}
 
 KRP_IMG ?= ${IMG_SERVICE_URL}/${RELEASE_LOC}/kube-rbac-proxy:${IMG_TAG}
